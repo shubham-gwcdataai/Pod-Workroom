@@ -1,0 +1,74 @@
+{
+  "name": "pod_demo",
+  "version": "1.0.0",
+  "size": { "width": 1, "height": 1 },
+  "collectionsMapping": [
+    {
+      "id": "37579002-42b0-4206-ac46-7452b4e5edbe",
+      "name": "Admin_Login",
+      "syncEnabled": true,
+      "schema": {
+        "columns": [
+          { "name": "email", "type": "STRING" },
+          { "name": "name", "type": "STRING" },
+          { "name": "title", "type": "STRING" },
+          { "name": "role", "type": "STRING" }
+        ]
+      }
+    },
+    {
+      "id": "dad64767-6744-498c-a471-fc5a224948e3",
+      "name": "POD_Members",
+      "syncEnabled": true,
+      "schema": {
+        "columns": [
+          { "name": "email", "type": "STRING" },
+          { "name": "name", "type": "STRING" },
+          { "name": "role", "type": "STRING" },
+          { "name": "title", "type": "STRING" },
+          { "name": "managerEmail", "type": "STRING" },
+          { "name": "initials", "type": "STRING" },
+          { "name": "color", "type": "STRING" },
+          { "name": "passwordHash", "type": "STRING" }
+        ]
+      }
+    },
+    {
+      "id": "a1edd90d-4d9d-48f0-8efc-efdc8f0f56cc",
+      "name": "POD_WorkItems",
+      "syncEnabled": true,
+      "schema": {
+        "columns": [
+          { "name": "title", "type": "STRING" },
+          { "name": "category", "type": "STRING" },
+          { "name": "priority", "type": "STRING" },
+          { "name": "status", "type": "STRING" },
+          { "name": "memberEmail", "type": "STRING" },
+          { "name": "dueDate", "type": "STRING" },
+          { "name": "assignedAt", "type": "STRING" },
+          { "name": "completedAt", "type": "STRING" },
+          { "name": "hours", "type": "DOUBLE" }
+        ]
+      }
+    },
+    {
+      "id": "143977bb-c3dc-4f17-81c2-a0092fe0325a",
+      "name": "POD_DailyUpdates",
+      "syncEnabled": true,
+      "schema": {
+        "columns": [
+          { "name": "date", "type": "STRING" },
+          { "name": "name", "type": "STRING" },
+          { "name": "memberEmail", "type": "STRING" },
+          { "name": "yesterdayActivity", "type": "STRING" },
+          { "name": "todayActivity", "type": "STRING" },
+          { "name": "blockers", "type": "STRING" },
+          { "name": "blockerStatus", "type": "STRING" }
+        ]
+      }
+    }
+],
+   "fileName": "manifest.json",
+   "id":"26533560-1e2b-49c8-9889-2672928434e7",
+   "proxyId":"b5190738-8e8a-41c2-8e1e-889fcb9382ab"
+}
