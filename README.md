@@ -9,14 +9,6 @@ npm install
 npm run dev
 ```
 
-The application opens with an email-only access screen. Configure the administrator in `.env`:
-
-```env
-VITE_ADMIN_EMAIL=admin@pod.local
-VITE_ADMIN_NAME=POD Administrator
-VITE_ADMIN_TITLE=Administrator
-```
-
 The configured administrator is seeded into the `Admin_Login` collection. Members are added through the admin dashboard and stored in `POD_Members` with one of three roles: Team lead, Team head, or Team member. Entering a member's email opens that member's dashboard and applies the stored role.
 
 Outside a Domo iframe, the app uses browser local storage so workflows can be tested without an AppDB connection. The dashboard starts empty; no sample members, assignments, or check-ins are added.
