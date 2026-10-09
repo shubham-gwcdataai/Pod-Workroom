@@ -34,8 +34,8 @@ export default function TeamHierarchy({ members, tasks, search = '', onEdit, onD
         const shown = reports.filter((report) => showAll || matches(person) || branchMatches(report));
         return <article key={person.email} className={`hierarchy-branch branch-${person.role}`}>
             {renderPerson(person)}
-            {person.role !== 'team-member' && <details open>
-                <summary>{reports.length} {person.role === 'team-lead' ? 'team heads' : 'team members'} <span>View team</span></summary>
+            {person.role !== 'team-member' && <details open={Boolean(query) || person.role === 'team-lead' || emailKey(person.email) === emailKey(rootEmail)}>
+                <summary>{reports.length} {person.role === 'team-lead' ? 'team head' : 'team member'}{reports.length === 1 ? '' : 's'} <span>View team</span></summary>
                 <div className="hierarchy-children">
                     {shown.map((report) => renderBranch(report, showAll || matches(person)))}
                     {reports.length === 0 && <p className="hierarchy-empty">No {person.role === 'team-lead' ? 'heads' : 'members'} assigned yet.</p>}

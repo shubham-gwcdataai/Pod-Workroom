@@ -39,6 +39,7 @@ async function setup(domoMode = false) {
   let source = await readFile(new URL('../src/podStore.js', import.meta.url), 'utf8');
   source = source.replace("import Domo from 'ryuu.js';", 'const Domo = globalThis.memberEditDomo;')
     .replace("'./utils/hierarchy.js'", JSON.stringify(new URL('../src/utils/hierarchy.js', import.meta.url).href))
+    .replace("'./utils/date.js'", JSON.stringify(new URL('../src/utils/date.js', import.meta.url).href))
     .replaceAll('import.meta.env', '({ VITE_ADMIN_EMAIL: "admin@qa.local" })');
   source += '\n// Test instance ' + Math.random();
   const store = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));

@@ -1,4 +1,5 @@
-import { Bell, CalendarDays, CircleHelp, Menu } from "lucide-react";
+import { useState } from "react";
+import { Bell, CalendarDays, CircleHelp, Menu, X } from "lucide-react";
 import AdminOverview from "./components/AdminOverview";
 import DailyUpdateForm from "./components/DailyUpdateForm";
 import DailyUpdatesView from "./components/DailyUpdatesView";
@@ -12,11 +13,17 @@ import Sidebar from "./components/Sidebar";
 import TeamView from "./components/TeamView";
 import WorkQueue from "./components/WorkQueue";
 import { useWorkspace } from "./hooks/useWorkspace";
-import { visibleMembers as getVisibleMembers } from "./utils/hierarchy";
+import { emailKey, visibleMembers as getVisibleMembers } from "./utils/hierarchy";
+import TeamOverview from "./components/TeamOverview";
+import ActivityHistory from "./components/ActivityHistory";
+import Notifications from "./components/Notifications";
+import { buildNotifications } from "./utils/dashboard";
 import "./App.css";
 
 const viewLabels = {
     overview: "Overview",
+    "team-overview": "Team overview",
+    activity: "Activity history",
     work: "Work queue",
     updates: "Daily check-ins",
     team: "POD members",
@@ -32,7 +39,13 @@ function App() {
         user,
         workspace,
         activeView,
-        setActiveView,
+        navigate,
+        viewFilters,
+        feedback,
+        dismissFeedback,
+        reassignTasks,
+        reassignPeople,
+        saveFollowUp,
         loginError,
         busy,
         showTaskForm,
@@ -50,8 +63,14 @@ function App() {
         addMember,
         changeMemberRole,
         removeMember,
+        removePeople,
+        removeTasks,
+        changeStatuses,
         submitDailyUpdate,
     } = useWorkspace();
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('pod-demo:sidebar-collapsed') === 'true');
+    const openView = (view, filters = {}) => { navigate(view, filters); setShowNotifications(false); };
     if (loading) {
         return (
             <div className="boot-screen">
@@ -73,13 +92,15 @@ function App() {
     const isAdmin = user.role === "admin";
     const isTeamHead = user.role === "team-head";
     const isTeamLead = user.role === "team-lead";
+    const isManager = isAdmin || isTeamHead || isTeamLead;
+    const notificationItems = buildNotifications(workspace, user);
     const visibleMembers = getVisibleMembers(workspace.members, user);
     const myTasks = workspace.tasks.filter((task) =>
-        task.memberEmail === user.email
+        emailKey(task.memberEmail) === emailKey(user.email)
     );
     return (
         <div
-            className={`app-shell ${isAdmin ? "admin-shell" : "member-shell"}`}
+            className={`app-shell ${isAdmin ? "admin-shell" : "member-shell"} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
         >
             <Sidebar
                 user={user}
@@ -87,9 +108,11 @@ function App() {
                 activeView={activeView}
                 workspace={workspace}
                 mobileNav={mobileNav}
-                onNavigate={setActiveView}
+                onNavigate={openView}
                 onCloseMobile={() => setMobileNav(false)}
                 onSignOut={signOut}
+                collapsed={sidebarCollapsed}
+                onToggle={() => setSidebarCollapsed((previous) => { localStorage.setItem('pod-demo:sidebar-collapsed', String(!previous)); return !previous; })}
             />
             <main className="main-column">
                 <header className="topbar">
@@ -121,10 +144,13 @@ function App() {
                             className="icon-button notification-button"
                             aria-label="Notifications"
                             title="Notifications"
+                            aria-expanded={showNotifications}
+                            onClick={() => setShowNotifications(!showNotifications)}
                         >
                             <Bell size={17} />
-                            <i />
+                            {notificationItems.length > 0 && <i />}
                         </button>
+                        {showNotifications && <Notifications items={notificationItems} onNavigate={openView} onClose={() => setShowNotifications(false)} />}
                         <span
                             className="avatar topbar-avatar"
                             style={{ backgroundColor: user.color || "#e4e8e5" }}
@@ -136,56 +162,81 @@ function App() {
                     </div>
                 </header>
                 <div className="page-content">
+                    {feedback && <div className={`feedback-banner feedback-${feedback.kind}`} role={feedback.kind === "error" ? "alert" : "status"}><span>{feedback.message}</span><button className="icon-button" aria-label="Dismiss message" onClick={dismissFeedback}><X size={16} /></button></div>}
+                    {!isAdmin && isManager && activeView === "team-overview" && <TeamOverview workspace={workspace} user={user} onNavigate={openView} />}
+                    {isAdmin && activeView === "activity" && <ActivityHistory activity={workspace.activity} />}
                     {isAdmin && activeView === "overview" && (
                         <AdminOverview
                             workspace={workspace}
                             counts={counts}
                             onNewTask={() => setShowTaskForm(true)}
-                            onNavigate={setActiveView}
+                            onAddPerson={() => setShowMemberForm(true)}
+                            onNavigate={openView}
                         />
                     )}
-                    {isAdmin && activeView === "work" && (
+                    {isManager && activeView === "work" && (
                         <WorkQueue
+                            key={JSON.stringify(viewFilters)}
+                            initialFilters={viewFilters}
+                            canManage={isAdmin}
+                            onReassign={reassignTasks}
+                            onDelete={removeTasks}
+                            onBulkStatus={changeStatuses}
+                            busy={busy}
                             tasks={workspace.tasks}
                             members={workspace.members}
                             onStatusChange={changeStatus}
                             onNewTask={() => setShowTaskForm(true)}
                         />
                     )}
-                    {isAdmin && activeView === "updates" && (
-                        <DailyUpdatesView updates={workspace.dailyUpdates} />
+                    {isManager && activeView === "updates" && (
+                        <DailyUpdatesView key={JSON.stringify(viewFilters)} initialFilters={viewFilters} updates={workspace.dailyUpdates} members={workspace.members} currentUser={user} onFollowUp={saveFollowUp} busy={busy} />
                     )}
                     {(isAdmin || isTeamHead || isTeamLead) && activeView === "team" && (
                         <TeamView
+                            key={JSON.stringify(viewFilters)}
+                            initialFilters={viewFilters}
+                            onReassignPeople={reassignPeople}
                             members={visibleMembers}
                             tasks={workspace.tasks}
                             currentUser={user}
+                            reportingManager={workspace.reportingManager}
                             canManage={isAdmin}
                             onAddMember={() => setShowMemberForm(true)}
                             onEditRole={setMemberToEdit}
                             onDeleteMember={removeMember}
+                            onDeletePeople={removePeople}
                             busy={busy}
                         />
                     )}
                     {!isAdmin && activeView === "my-work" && (
                         <MemberWork
+                            key={JSON.stringify(viewFilters)}
+                            initialFilters={viewFilters}
+                            updates={workspace.dailyUpdates}
+                            reportingManager={workspace.reportingManager}
+                            busy={busy}
+                            onNavigate={openView}
                             user={user}
                             tasks={myTasks}
                             onStatusChange={changeStatus}
-                            onDailyUpdate={() => setActiveView("daily-log")}
+                            onDailyUpdate={() => openView("daily-log")}
                         />
                     )}
                     {!isAdmin && activeView === "daily-log" && (
                         <DailyUpdateForm
                             user={user}
                             updates={workspace.dailyUpdates.filter((update) =>
-                                update.memberEmail === user.email
+                                emailKey(update.memberEmail) === emailKey(user.email)
                             )}
                             onSave={submitDailyUpdate}
                         />
                     )}
                     {!isAdmin && activeView === "history" && (
                         <MemberHistory
+                            key={JSON.stringify(viewFilters)}
+                            initialFilters={viewFilters}
+                            user={user}
                             tasks={myTasks.filter((task) =>
                                 task.status === "Complete"
                             )}

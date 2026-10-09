@@ -1,108 +1,33 @@
-import { useState } from "react";
-import { CalendarDays, Search } from "lucide-react";
-import { prettyDate } from "../utils/date";
-import { EmptyState, PageIntro } from "./Shared";
+import { useState } from 'react';
+import { Search, X } from 'lucide-react';
+import { prettyDate, inDateRange, localDate } from '../utils/date';
+import { emailKey } from '../utils/hierarchy';
+import { filterBranch, hasOpenBlocker, missingCheckIns } from '../utils/dashboard';
+import { EmptyState, PageIntro } from './Shared';
+import { DateFilters, TeamFilters } from './FilterControls';
 
-export default function DailyUpdatesView({ updates }) {
-    const [search, setSearch] = useState("");
-    const filtered = updates.filter((update) =>
-        `${update.name} ${update.yesterdayActivity} ${update.todayActivity} ${update.blockers}`
-            .toLowerCase().includes(search.toLowerCase())
-    );
-    const openCount =
-        updates.filter((update) =>
-            update.blockerStatus === "Not solved" && update.blockers?.trim()
-        ).length;
-    return (
-        <>
-            <PageIntro
-                eyebrow="TEAM REPORTING"
-                title="Daily check-ins"
-                subtitle="The POD’s yesterday, today, and any blockers that need attention."
-                actions={
-                    <span className="updates-date">
-                        <CalendarDays size={14} />{" "}
-                        {new Intl.DateTimeFormat("en", { dateStyle: "medium" })
-                            .format(new Date())}
-                    </span>
-                }
-            />
-            <section className="daily-report-stats">
-                <article>
-                    <span>Reports logged</span>
-                    <strong>{updates.length}</strong>
-                </article>
-                <article className={openCount ? "report-stat-alert" : ""}>
-                    <span>Unresolved blockers</span>
-                    <strong>{openCount}</strong>
-                </article>
-                <label className="search-field">
-                    <Search size={16} />
-                    <input
-                        aria-label="Search daily updates"
-                        placeholder="Search the daily log"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                    />
-                </label>
-            </section>
-            <section className="daily-table-wrap panel">
-                <table className="daily-table">
-                    <thead>
-                        <tr>
-                            <th>DATE</th>
-                            <th>NAME</th>
-                            <th>YESTERDAY’S ACTIVITY</th>
-                            <th>TODAY’S ACTIVITY</th>
-                            <th>BLOCKERS</th>
-                            <th>SOLVED / NOT</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filtered.map((update) => (
-                            <tr key={update.id}>
-                                <td>{prettyDate(update.date)}</td>
-                                <td>
-                                    <strong>{update.name}</strong>
-                                </td>
-                                <td>{update.yesterdayActivity}</td>
-                                <td>{update.todayActivity}</td>
-                                <td
-                                    className={update.blockerStatus ===
-                                            "Not solved"
-                                        ? "blocker-cell-open"
-                                        : ""}
-                                >
-                                    {update.blockers?.trim() || "None"}
-                                </td>
-                                <td>
-                                    <span
-                                        className={`blocker-pill ${
-                                            update.blockerStatus ===
-                                                    "Not solved"
-                                                ? "blocker-open"
-                                                : update.blockerStatus ===
-                                                        "Solved"
-                                                ? "blocker-solved"
-                                                : "blocker-clear"
-                                        }`}
-                                    >
-                                        {update.blockerStatus}
-                                    </span>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {filtered.length === 0 && (
-                    <EmptyState
-                        title="No matching check-ins"
-                        detail="Try another name or activity."
-                    />
-                )}
-            </section>
-        </>
-    );
+export default function DailyUpdatesView({ updates, members = [], currentUser, initialFilters = {}, onFollowUp, busy }) {
+    const [filters, setFilters] = useState({ search: '', from: '', to: '', date: localDate(), ...initialFilters });
+    const [editing, setEditing] = useState(null);
+    const [error, setError] = useState('');
+    const selectedMembers = filterBranch(members, filters.leadEmail, filters.headEmail).filter((person) => !filters.ownerEmail || emailKey(person.email) === emailKey(filters.ownerEmail));
+    const emails = new Set(selectedMembers.map((person) => emailKey(person.email)));
+    const logs = updates.filter((update) => (!(filters.leadEmail || filters.headEmail || filters.ownerEmail) || emails.has(emailKey(update.memberEmail))) && inDateRange(update.date, filters.from, filters.to));
+    const filtered = logs.filter((update) => (!filters.blockers || hasOpenBlocker(update)) && (!filters.escalated || emailKey(update.escalatedTo) === emailKey(currentUser?.email)) && `${update.name} ${update.yesterdayActivity} ${update.todayActivity} ${update.blockers} ${update.followUp || ''}`.toLowerCase().includes(filters.search.toLowerCase()));
+    const missing = missingCheckIns(selectedMembers, updates, filters.date).filter((person) => `${person.name} ${person.email}`.toLowerCase().includes(filters.search.toLowerCase()));
+    const change = (value) => setFilters((previous) => ({ ...previous, ...value }));
+    async function save(event) {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        try { await onFollowUp(editing.id, { note: form.get('note'), resolved: form.get('resolved') === 'on', escalate: form.get('escalate') === 'on' }); setEditing(null); }
+        catch (failure) { setError(failure.message); }
+    }
+    return <>
+        <PageIntro eyebrow="TEAM REPORTING" title="Daily check-ins" subtitle="Review team progress, follow up on blockers, and see who has not checked in." />
+        <div className="report-filters"><TeamFilters members={members} {...filters} onChange={change} /><DateFilters label="Check-in date" {...filters} onChange={change} /><label className="check-filter"><input type="checkbox" checked={Boolean(filters.blockers)} onChange={(event) => change({ blockers: event.target.checked, missing: false })} />Open blockers only</label><label className="check-filter"><input type="checkbox" checked={Boolean(filters.escalated)} onChange={(event) => change({ escalated: event.target.checked, missing: false })} />Escalated to me</label><button className="button-secondary" onClick={() => change({ search: '', from: '', to: '', leadEmail: '', headEmail: '', ownerEmail: '', blockers: false, escalated: false, missing: false })}>Clear filters</button></div>
+        <div className="daily-report-stats"><article><span>Matching reports</span><strong>{filtered.length}</strong></article><article><span>Matching open blockers</span><strong>{filtered.filter(hasOpenBlocker).length}</strong></article><label className="search-field"><Search size={16} /><input aria-label="Search daily updates" placeholder="Search people or activity" value={filters.search} onChange={(event) => change({ search: event.target.value })} /></label></div>
+        <section className="panel missing-panel"><div className="panel-heading"><h2>Check-in attendance</h2><label>Date<input aria-label="Attendance date" type="date" value={filters.date} max={localDate()} onChange={(event) => change({ date: event.target.value || localDate() })} /></label></div><button className="text-link" onClick={() => change({ missing: !filters.missing })}>{filters.missing ? 'Show check-in reports' : `${missing.length} ${missing.length === 1 ? 'person has' : 'people have'} not checked in · View list`}</button>{filters.missing && <div className="attendance-list">{missing.map((person) => <div key={person.email}><strong>{person.name}</strong><span>{person.email}</span><span>Missing</span></div>)}{missing.length === 0 && <p>Everyone in this selection has checked in.</p>}</div>}</section>
+        {!filters.missing && <section className="daily-table-wrap panel"><table className="daily-table"><thead><tr><th>Date</th><th>Name</th><th>Yesterday</th><th>Today</th><th>Blockers / follow-up</th><th>Status</th></tr></thead><tbody>{filtered.map((update) => <tr key={update.id}><td>{prettyDate(update.date)}</td><td><strong>{update.name}</strong></td><td>{update.yesterdayActivity}</td><td>{update.todayActivity}</td><td>{update.blockers?.trim() || 'None'}{update.followUp && <div className="follow-up-note"><strong>{update.followUpBy}</strong><p>{update.followUp}</p></div>}{update.escalatedTo && <small className="escalation-label">Escalated to {members.find((person) => emailKey(person.email) === emailKey(update.escalatedTo))?.name || update.escalatedTo}</small>}{update.blockers?.trim() && onFollowUp && <button className="person-action" disabled={busy} onClick={() => { setEditing(update); setError(''); }}>Follow up</button>}</td><td><span className={`blocker-pill ${hasOpenBlocker(update) ? 'blocker-open' : update.blockerStatus === 'Solved' ? 'blocker-solved' : 'blocker-clear'}`}>{update.blockerStatus}</span></td></tr>)}</tbody></table>{filtered.length === 0 && <EmptyState title="No matching check-ins" detail="Try another date, person, or team." />}</section>}
+        {editing && <div className="modal-backdrop" onMouseDown={() => !busy && setEditing(null)}><section className="task-dialog" role="dialog" aria-modal="true" aria-labelledby="follow-up-title" onMouseDown={(event) => event.stopPropagation()}><header><h2 id="follow-up-title">Follow up · {editing.name}</h2><button className="icon-button" disabled={busy} aria-label="Close follow-up" onClick={() => setEditing(null)}><X size={18} /></button></header><p className="delete-description">{editing.blockers}</p><form onSubmit={save}><label>Follow-up note<textarea autoFocus name="note" defaultValue={editing.followUp || ''} required rows={3} disabled={busy} /></label><label className="check-filter"><input name="resolved" type="checkbox" defaultChecked={editing.blockerStatus === 'Solved'} disabled={busy} />Mark resolved</label>{currentUser?.role !== 'admin' && <label className="check-filter"><input name="escalate" type="checkbox" disabled={busy || (currentUser?.role === 'team-head' && !currentUser.managerEmail)} />Escalate to my {currentUser?.role === 'team-head' ? 'lead' : 'admin'}</label>}{error && <p role="alert" className="dialog-error">{error}</p>}<footer><button type="button" className="button-secondary" disabled={busy} onClick={() => setEditing(null)}>Cancel</button><button className="button-primary" disabled={busy}>{busy ? 'Saving…' : 'Save follow-up'}</button></footer></form></section></div>}
+    </>;
 }
-
-

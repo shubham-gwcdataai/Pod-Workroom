@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import {
     authenticateCurrentUser,
+    bulkReassignPeople,
+    bulkReassignTasks,
+    bulkDeletePeople,
+    bulkDeleteTasks,
+    bulkUpdateTaskStatus,
     createMember,
     createTask,
     deleteMember,
+    followUpBlocker,
     initializeStore,
     loadWorkspace,
     saveDailyUpdate,
     updateMember,
     updateTask,
 } from "../podStore";
+import { localDate } from '../utils/date';
+
+const initialView = (user) => user?.role === 'admin' ? 'overview' : ['team-head', 'team-lead'].includes(user?.role) ? 'team-overview' : 'my-work';
 
 export function useWorkspace() {
     const [loading, setLoading] = useState(true);
@@ -22,6 +31,8 @@ export function useWorkspace() {
     const [showMemberForm, setShowMemberForm] = useState(false);
     const [memberToEdit, setMemberToEdit] = useState(null);
     const [mobileNav, setMobileNav] = useState(false);
+    const [viewFilters, setViewFilters] = useState({});
+    const [feedback, setFeedback] = useState(null);
     const signedIn = Boolean(user);
     const userRole = user?.role;
     const userEmail = user?.email;
@@ -38,12 +49,12 @@ export function useWorkspace() {
                 if (authenticatedUser) {
                     setUser(authenticatedUser);
                     localStorage.setItem("pod-demo:session", JSON.stringify(authenticatedUser));
-                    setActiveView(authenticatedUser.role === "admin" ? "overview" : "my-work");
+                    setActiveView(initialView(authenticatedUser));
                 } else {
                     setLoginError("No matching Domo user was found in the POD collections.");
                 }
             })
-            .catch(() => alive && setLoginError("Could not connect to POD data. Check the AppDB collections and try again."))
+            .catch((error) => alive && setLoginError(error.message || "Could not connect to POD data. Check the AppDB collections and try again."))
             .finally(() => alive && setLoading(false));
         return () => { alive = false; };
     }, []);
@@ -56,7 +67,7 @@ export function useWorkspace() {
             Promise.all([loadWorkspace(), authenticateCurrentUser()]).then(([data, currentUser]) => {
                 if (!alive) return;
                 setWorkspace(data);
-                if (userRole !== currentUser?.role) setActiveView(currentUser?.role === 'admin' ? 'overview' : 'my-work');
+                if (userRole !== currentUser?.role) { setActiveView(initialView(currentUser)); setViewFilters({}); }
                 setUser(currentUser);
             }).catch(() => {});
         };
@@ -81,72 +92,61 @@ export function useWorkspace() {
         setUser(null);
         setLoginError("");
         setActiveView("overview");
+        setFeedback(null);
+        setViewFilters({});
     }
+
+    function navigate(view, filters = {}) { setViewFilters(filters); setActiveView(view); }
 
     async function refreshWorkspace() { setWorkspace(await loadWorkspace()); }
 
-    async function changeStatus(taskId, status) {
+    async function perform(action, message, afterSave, rethrow = true) {
         setBusy(true);
+        setFeedback(null);
         try {
-            await updateTask(taskId, { status, ...(status === "Complete" ? { completedAt: new Date().toISOString().slice(0, 10) } : {}) });
-            await refreshWorkspace();
-        } finally {
-            setBusy(false);
-        }
+            const result = await action();
+            let warning = result?.warning || result?.warnings?.join(' ');
+            try { await refreshWorkspace(); } catch { warning = 'Saved, but the latest data could not be reloaded. Refresh the page to see the change.'; }
+            afterSave?.();
+            setFeedback({ kind: warning || result?.failed ? 'warning' : 'success', message: `${typeof message === 'function' ? message(result) : message}${warning ? ` ${warning}` : ''}` });
+            return result;
+        } catch (error) {
+            setFeedback({ kind: 'error', message: error.message || 'The change could not be saved. Try again.' });
+            if (rethrow) throw error;
+            return null;
+        } finally { setBusy(false); }
+    }
+
+    async function changeStatus(taskId, status) {
+        return perform(() => updateTask(taskId, { status }), 'Task status saved.', null, false);
     }
 
     async function addTask(task) {
-        setBusy(true);
-        try {
-            await createTask({ ...task, assignedAt: new Date().toISOString().slice(0, 10) });
-            await refreshWorkspace();
-            setShowTaskForm(false);
-        } finally {
-            setBusy(false);
-        }
+        return perform(() => createTask({ ...task, assignedAt: localDate() }), 'Assignment created.', () => setShowTaskForm(false));
     }
 
     async function addMember(member) {
-        setBusy(true);
-        try {
-            await createMember(member);
-            await refreshWorkspace();
-            setShowMemberForm(false);
-        } finally {
-            setBusy(false);
-        }
+        return perform(() => createMember(member), 'Person added.', () => setShowMemberForm(false));
     }
 
     async function changeMemberRole(email, changes) {
-        setBusy(true);
-        try {
-            await updateMember(email, changes);
-            await refreshWorkspace();
-            setMemberToEdit(null);
-        } finally {
-            setBusy(false);
-        }
+        return perform(() => updateMember(email, changes), 'Person details saved.', () => setMemberToEdit(null));
     }
 
     async function removeMember(email) {
-        setBusy(true);
-        try {
-            await deleteMember(email);
-            await refreshWorkspace();
-        } finally {
-            setBusy(false);
-        }
+        return perform(() => deleteMember(email), 'Person deleted. Work history retained.');
     }
 
     async function submitDailyUpdate(update) {
-        setBusy(true);
-        try {
-            await saveDailyUpdate(update);
-            await refreshWorkspace();
-        } finally {
-            setBusy(false);
-        }
+        return perform(() => saveDailyUpdate(update), 'Daily check-in saved.');
     }
+
+    const reassignTasks = (ids, email) => perform(() => bulkReassignTasks(ids, email), (result) => `${result.saved} assignments reassigned; ${result.failed} failed.`);
+    const reassignPeople = (emails, manager) => perform(() => bulkReassignPeople(emails, manager), (result) => `${result.saved} people reassigned; ${result.failed} failed.`);
+    const saveFollowUp = (id, changes) => perform(() => followUpBlocker(id, changes), 'Blocker follow-up saved.');
+    const removePeople = (emails) => perform(() => bulkDeletePeople(emails), (result) => `${result.saved} people deleted; ${result.failed} failed. Work history retained.`);
+    const removeTasks = (ids) => perform(() => bulkDeleteTasks(ids), (result) => `${result.saved} assignments deleted; ${result.failed} failed.`);
+    const changeStatuses = (ids, status) => perform(() => bulkUpdateTaskStatus(ids, status), (result) => `${result.saved} assignment statuses updated; ${result.failed} failed.`);
 
     return {
         loading,
@@ -154,6 +154,10 @@ export function useWorkspace() {
         workspace,
         activeView,
         setActiveView,
+        navigate,
+        viewFilters,
+        feedback,
+        dismissFeedback: () => setFeedback(null),
         loginError,
         busy,
         showTaskForm,
@@ -172,5 +176,11 @@ export function useWorkspace() {
         changeMemberRole,
         removeMember,
         submitDailyUpdate,
+        reassignTasks,
+        reassignPeople,
+        saveFollowUp,
+        removePeople,
+        removeTasks,
+        changeStatuses,
     };
 }

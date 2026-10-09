@@ -1,5 +1,6 @@
 import Domo from 'ryuu.js';
-import { emailKey, parentRole, scopeWorkspace, validateHierarchy } from './utils/hierarchy.js';
+import { emailKey, parentRole, scopeWorkspace, validateHierarchy, visibleMembers } from './utils/hierarchy.js';
+import { localDate } from './utils/date.js';
 
 const COLLECTIONS = {
   admins: 'Admin_Login',
@@ -51,8 +52,17 @@ function writeLocal(collection, documents) {
 
 async function list(collection) {
   if (!inDomo()) return readLocal(collection)
-  const Domo = await getDomo()
-  return normalizeDocuments(await Domo.appdb.list(collection))
+  try {
+    const Domo = await getDomo()
+    return normalizeDocuments(await Domo.appdb.list(collection))
+  } catch (cause) {
+    const status = Number(cause?.status ?? cause?.statusCode ?? cause?.response?.status)
+    const reason = status === 403 ? 'Document read access was denied. Check read_content permission for this user and installed app.'
+      : status === 401 ? 'The Domo session is not authorized. Sign in again.'
+      : status === 404 ? 'Check the collection mapping on this installed app.'
+      : 'Check the AppDB connection and collection mapping.'
+    throw new Error(`Could not read ${collection}${status >= 400 && status <= 599 ? ` (HTTP ${status})` : ''}. ${reason}`, { cause })
+  }
 }
 
 async function create(collection, document) {
@@ -101,6 +111,14 @@ async function cleanLegacyDemoData() {
 }
 
 async function seedStore() {
+  if (inDomo()) {
+    const domo = await getDomo()
+    const email = emailKey(domo.env.userEmail)
+    if (!email) return
+    if (email !== ADMIN_SEED.email && (await list(COLLECTIONS.members)).some((member) => emailKey(member.email) === email)) return
+    const admins = await list(COLLECTIONS.admins)
+    if (email !== ADMIN_SEED.email && !admins.some((admin) => emailKey(admin.email) === email)) return
+  }
   await cleanLegacyDemoData()
   const admins = await list(COLLECTIONS.admins)
   const configuredAdmin = admins.find(
@@ -147,11 +165,13 @@ export async function authenticateCurrentUser() {
   const authenticatedEmail = domo.env?.userEmail?.trim().toLowerCase() || ''
   if (!authenticatedEmail) return null
 
-  const [admins, members] = await Promise.all([
-    list(COLLECTIONS.admins),
-    list(COLLECTIONS.members),
-  ])
-  const admin = admins.find((candidate) => candidate.email?.toLowerCase() === authenticatedEmail)
+  const members = await list(COLLECTIONS.members)
+  const member = members.find((candidate) => emailKey(candidate.email) === authenticatedEmail)
+  if (member && authenticatedEmail !== ADMIN_SEED.email) {
+    return { ...member, name: member.name || domo.env.userName, role: member.role || 'team-member' }
+  }
+  const admins = await list(COLLECTIONS.admins)
+  const admin = admins.find((candidate) => emailKey(candidate.email) === authenticatedEmail)
   if (admin || authenticatedEmail === ADMIN_SEED.email) {
     return {
       ...(admin || {}),
@@ -162,13 +182,7 @@ export async function authenticateCurrentUser() {
     }
   }
 
-  const member = members.find((candidate) => candidate.email?.toLowerCase() === authenticatedEmail)
-  if (!member) return null
-  return {
-    ...member,
-    name: member.name || domo.env.userName,
-    role: member.role || 'team-member',
-  }
+  return null
 }
 
 export async function loadWorkspace() {
@@ -177,11 +191,41 @@ export async function loadWorkspace() {
     list(COLLECTIONS.tasks),
     list(COLLECTIONS.dailyUpdates),
   ])
-  return scopeWorkspace({
+  const user = await authenticateCurrentUser()
+  const workspace = scopeWorkspace({
     members: members.map((member) => Object.fromEntries(Object.entries(member).filter(([key]) => key !== 'passwordHash'))),
     tasks,
     dailyUpdates: dailyUpdates.sort((first, second) => `${second.date}${second.id}`.localeCompare(`${first.date}${first.id}`)),
-  }, await authenticateCurrentUser())
+  }, user)
+  if (user?.role === 'admin') {
+    const admins = await list(COLLECTIONS.admins)
+    workspace.activity = admins.flatMap((admin) => {
+      try {
+        const entries = JSON.parse(admin.activityLog || '[]')
+        return Array.isArray(entries) ? entries.filter((event) => event && typeof event.at === 'string' && !Number.isNaN(Date.parse(event.at))) : []
+      } catch { return [] }
+    }).sort((a, b) => b.at.localeCompare(a.at))
+  }
+  return workspace
+}
+
+async function recordActivity(action, target, details = '') {
+  try {
+    const actor = await authenticateCurrentUser()
+    if (actor?.role !== 'admin') return ''
+    const admins = await list(COLLECTIONS.admins)
+    const admin = admins.find((item) => emailKey(item.email) === emailKey(actor.email))
+    if (!admin) throw new Error('Admin record missing.')
+    let entries
+    try { entries = JSON.parse(admin.activityLog || '[]'); if (!Array.isArray(entries)) entries = [] } catch { entries = [] }
+    const event = { id: crypto.randomUUID(), at: new Date().toISOString(), actor: actor.name, action, target, details }
+    const updated = { ...admin, activityLog: JSON.stringify([event, ...entries].slice(0, 500)) }
+    if (!inDomo()) writeLocal(COLLECTIONS.admins, admins.map((row) => row.id === admin.id ? updated : row))
+    else await (await getDomo()).appdb.update(COLLECTIONS.admins, admin.id, updated)
+    return ''
+  } catch {
+    return 'Saved, but the activity history could not be updated.'
+  }
 }
 
 async function requireAdmin() {
@@ -195,14 +239,25 @@ export async function updateTask(taskId, changes) {
   if (!user || !existing || (user.role !== 'admin' && emailKey(existing.memberEmail) !== emailKey(user.email))) {
     throw new Error('You can only update your own work items.')
   }
-  if (!inDomo()) {
-    writeLocal(COLLECTIONS.tasks, readLocal(COLLECTIONS.tasks).map((task) => task.id === taskId ? { ...task, ...changes } : task))
-    return
+  const status = changes.status ?? existing.status
+  if (!['Not started', 'In progress', 'Complete'].includes(status)) throw new Error('Choose a valid task status.')
+  if (user.role !== 'admin' && Object.keys(changes).some((key) => !['status', 'completedAt'].includes(key))) {
+    throw new Error('Only administrators can reassign or edit work items.')
   }
-  const Domo = await getDomo()
-  const task = (await list(COLLECTIONS.tasks)).find((item) => item.id === taskId)
-  if (!task) throw new Error('That work item no longer exists.')
-  await Domo.appdb.update(COLLECTIONS.tasks, taskId, { ...task, ...changes })
+  const nextOwner = emailKey(changes.memberEmail ?? existing.memberEmail)
+  if (changes.memberEmail !== undefined && !(await list(COLLECTIONS.members)).some((member) => emailKey(member.email) === nextOwner)) {
+    throw new Error('Select an existing person for this assignment.')
+  }
+  const updated = { ...existing, ...changes, memberEmail: nextOwner, status,
+    completedAt: status === 'Complete' ? (existing.status === 'Complete' ? existing.completedAt || '' : localDate()) : '' }
+  if (!inDomo()) {
+    writeLocal(COLLECTIONS.tasks, readLocal(COLLECTIONS.tasks).map((task) => task.id === taskId ? updated : task))
+  } else {
+    const Domo = await getDomo()
+    await Domo.appdb.update(COLLECTIONS.tasks, taskId, updated)
+  }
+  const warning = nextOwner !== emailKey(existing.memberEmail) ? await recordActivity('Reassigned work', existing.title, `${existing.memberEmail} → ${nextOwner}`) : ''
+  return { ...updated, warning }
 }
 
 export async function createMember(member) {
@@ -226,7 +281,8 @@ export async function createMember(member) {
     color: member.color || '#e3ebe5',
   }
   validateHierarchy(normalized, members)
-  return create(COLLECTIONS.members, normalized)
+  const created = await create(COLLECTIONS.members, normalized)
+  return { ...created, warning: await recordActivity('Added person', normalized.name, `${normalized.role} · ${normalized.email}`) }
 }
 
 export async function updateMember(email, changes) {
@@ -276,8 +332,11 @@ export async function updateMember(email, changes) {
       relatedWrites.push({ collection: COLLECTIONS.members, original: report, updated: { ...report, managerEmail: nextEmail } })
     }
     for (const collection of [COLLECTIONS.tasks, COLLECTIONS.dailyUpdates]) {
-      for (const record of (await list(collection)).filter((item) => emailKey(item.memberEmail) === emailKey(member.email))) {
-        relatedWrites.push({ collection, original: record, updated: { ...record, memberEmail: nextEmail } })
+      for (const record of (await list(collection)).filter((item) => emailKey(item.memberEmail) === emailKey(member.email) || (collection === COLLECTIONS.dailyUpdates && emailKey(item.escalatedTo) === emailKey(member.email)))) {
+        const updated = { ...record }
+        if (emailKey(record.memberEmail) === emailKey(member.email)) updated.memberEmail = nextEmail
+        if (collection === COLLECTIONS.dailyUpdates && emailKey(record.escalatedTo) === emailKey(member.email)) updated.escalatedTo = nextEmail
+        relatedWrites.push({ collection, original: record, updated })
       }
     }
   }
@@ -287,7 +346,7 @@ export async function updateMember(email, changes) {
       writeLocal(write.collection, readLocal(write.collection).map((record) => record.id === write.original.id ? write.updated : record))
     }
     writeLocal(COLLECTIONS.members, readLocal(COLLECTIONS.members).map((candidate) => candidate.id === member.id ? nextMember : candidate))
-    return nextMember
+    return { ...nextMember, warning: await recordActivity('Updated person', nextMember.name, describePersonChanges(member, nextMember)) }
   }
 
   const Domo = await getDomo()
@@ -298,7 +357,7 @@ export async function updateMember(email, changes) {
       completedWrites.push(write)
     }
     const updated = await Domo.appdb.update(COLLECTIONS.members, member.id, nextMember)
-    return { ...updated.content, id: updated.id ?? updated._id }
+    return { ...updated.content, id: updated.id ?? updated._id, warning: await recordActivity('Updated person', nextMember.name, describePersonChanges(member, nextMember)) }
   } catch (failure) {
     const recovery = await Promise.allSettled(completedWrites.map((write) => Domo.appdb.update(write.collection, write.original.id, write.original)))
     if (recovery.some((result) => result.status === 'rejected')) {
@@ -310,8 +369,50 @@ export async function updateMember(email, changes) {
 
 export async function createTask(task) {
   await requireAdmin()
-  return create(COLLECTIONS.tasks, task)
+  const created = await create(COLLECTIONS.tasks, task)
+  return { ...created, warning: await recordActivity('Created work', task.title, task.memberEmail) }
 }
+
+function describePersonChanges(before, after) {
+  return ['name', 'title', 'email', 'role', 'managerEmail'].filter((key) => (before[key] || '') !== (after[key] || ''))
+    .map((key) => `${key}: ${before[key] || 'Unassigned'} → ${after[key] || 'Unassigned'}`).join('; ') || 'Details saved'
+}
+
+export async function bulkReassignTasks(ids, memberEmail) {
+  return bulkOperation(ids, (id) => updateTask(id, { memberEmail }))
+}
+
+export async function bulkReassignPeople(emails, managerEmail) {
+  return bulkOperation(emails.map(emailKey), (email) => updateMember(email, { managerEmail }))
+}
+
+async function bulkOperation(items, operation) {
+  await requireAdmin()
+  const results = { saved: 0, failed: 0, savedIds: [], failedIds: [], warnings: [] }
+  for (const id of new Set(items)) {
+    try {
+      const result = await operation(id)
+      results.saved++; results.savedIds.push(id)
+      if (result.warning) results.warnings.push(result.warning)
+    } catch (error) { results.failed++; results.failedIds.push(id); results.warnings.push(error.message) }
+  }
+  return results
+}
+
+export async function deleteTask(id) {
+  await requireAdmin()
+  const task = (await list(COLLECTIONS.tasks)).find((item) => item.id === id)
+  if (!task) throw new Error('That assignment no longer exists.')
+  if (inDomo()) {
+    const domo = await getDomo()
+    await domo.appdb.remove(COLLECTIONS.tasks, task.id)
+  } else writeLocal(COLLECTIONS.tasks, readLocal(COLLECTIONS.tasks).filter((item) => item.id !== id))
+  return { warning: await recordActivity('Deleted work', task.title, task.memberEmail) }
+}
+
+export const bulkDeleteTasks = (ids) => bulkOperation(ids, deleteTask)
+export const bulkDeletePeople = (emails) => bulkOperation(emails.map(emailKey), deleteMember)
+export const bulkUpdateTaskStatus = (ids, status) => bulkOperation(ids, (id) => updateTask(id, { status }))
 
 export async function deleteMember(email) {
   await requireAdmin()
@@ -322,19 +423,52 @@ export async function deleteMember(email) {
   if (!inDomo()) {
     writeLocal(COLLECTIONS.members, documents.filter((candidate) => candidate.id !== member.id)
       .map((candidate) => reports.includes(candidate) ? { ...candidate, managerEmail: '' } : candidate))
-    return
+    return { warning: await recordActivity('Deleted person', member.name, member.email) }
   }
   const domo = await getDomo()
   for (const report of reports) {
     await domo.appdb.update(COLLECTIONS.members, report.id, { ...report, managerEmail: '' })
   }
   await domo.appdb.remove(COLLECTIONS.members, member.id)
+  return { warning: await recordActivity('Deleted person', member.name, member.email) }
+}
+
+export async function followUpBlocker(id, { note, resolved, escalate }) {
+  const actor = await authenticateCurrentUser()
+  if (!actor || !['admin', 'team-head', 'team-lead'].includes(actor.role)) throw new Error('Only your head, lead, or admin can follow up on team blockers.')
+  const members = await list(COLLECTIONS.members)
+  const update = (await list(COLLECTIONS.dailyUpdates)).find((item) => item.id === id)
+  const scope = visibleMembers(members, actor)
+  if (!update || (actor.role !== 'admin' && !scope.some((person) => emailKey(person.email) === emailKey(update.memberEmail)))) {
+    throw new Error('This check-in is outside your team.')
+  }
+  if (!update.blockers?.trim()) throw new Error('This check-in has no blocker to follow up on.')
+  const target = actor.role === 'team-head' ? members.find((person) => person.role === 'team-lead' && emailKey(person.email) === emailKey(actor.managerEmail))?.email
+    : actor.role === 'team-lead' ? ADMIN_SEED.email : ''
+  if (escalate && (!target || resolved)) throw new Error('An open blocker needs a reporting manager before it can be escalated.')
+  if (!note?.trim()) throw new Error('Add a follow-up note.')
+  const changed = { ...update, followUp: note.trim(), followUpBy: actor.name, followUpAt: new Date().toISOString(),
+    blockerStatus: resolved ? 'Solved' : 'Not solved',
+    escalatedTo: resolved ? '' : escalate ? target : update.escalatedTo || '' }
+  if (!inDomo()) writeLocal(COLLECTIONS.dailyUpdates, readLocal(COLLECTIONS.dailyUpdates).map((item) => item.id === id ? changed : item))
+  else await (await getDomo()).appdb.update(COLLECTIONS.dailyUpdates, id, changed)
+  return changed
 }
 
 export async function saveDailyUpdate(update) {
   const user = await authenticateCurrentUser()
   if (!user || (user.role !== 'admin' && emailKey(update.memberEmail) !== emailKey(user.email))) {
     throw new Error('You can only submit your own daily update.')
+  }
+  const blockers = update.blockers?.trim() || ''
+  update = {
+    date: update.date,
+    name: user.role === 'admin' ? update.name : user.name,
+    memberEmail: emailKey(update.memberEmail),
+    yesterdayActivity: update.yesterdayActivity || '',
+    todayActivity: update.todayActivity || '',
+    blockers,
+    blockerStatus: blockers ? (update.blockerStatus === 'Solved' ? 'Solved' : 'Not solved') : 'No blocker',
   }
   const existing = (await list(COLLECTIONS.dailyUpdates)).find((item) => item.memberEmail === update.memberEmail && item.date === update.date)
   if (!existing) return create(COLLECTIONS.dailyUpdates, update)

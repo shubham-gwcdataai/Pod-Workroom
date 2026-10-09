@@ -1,233 +1,39 @@
-import { Activity, ArrowRight, BriefcaseBusiness, Check, CheckCheck, CircleHelp, Clock3, FileText } from "lucide-react";
-import { initials, prettyDate } from "../utils/date";
-import { EmptyState, MemberTaskRow } from "./Shared";
+import { useState } from 'react';
+import { BriefcaseBusiness, CheckCheck, Clock3, FileText } from 'lucide-react';
+import { PageIntro, StatCard, EmptyState } from './Shared';
+import TaskDetails from './TaskDetails';
+import { DateFilters } from './FilterControls';
+import { localDate, weekRange, inDateRange, isOverdue, prettyDate } from '../utils/date';
+import { emailKey } from '../utils/hierarchy';
+import { hasOpenBlocker } from '../utils/dashboard';
 
-export default function MemberWork({ user, tasks, onStatusChange, onDailyUpdate }) {
-    const open = tasks.filter((task) => task.status !== "Complete");
-    const completed = tasks.filter((task) => task.status === "Complete").length;
-    const nextTask = open.find((task) => task.status === "In progress") ||
-        open[0];
-    return (
-        <div className="member-dashboard">
-            <section className="member-welcome">
-                <div>
-                    <div className="member-date">
-                        <span className="welcome-spark">✳</span> YOUR POD DESK
-                        {" "}
-                        <span className="welcome-line" />{" "}
-                        {new Intl.DateTimeFormat("en", {
-                            weekday: "long",
-                            month: "long",
-                            day: "numeric",
-                        }).format(new Date()).toUpperCase()}
-                    </div>
-                    <h1>
-                        Good morning,<br />
-                        <em>{user.name.split(" ")[0]}.</em>
-                    </h1>
-                    <p>Steady progress adds up. Here’s your work for today.</p>
-                </div>
-                <div className="welcome-illustration" aria-hidden="true">
-                    <div className="illustration-paper">
-                        <span />
-                        <span />
-                        <span />
-                        <i>
-                            <Check size={16} />
-                        </i>
-                    </div>
-                    <div className="illustration-stamp">
-                        POD<br />ON IT
-                    </div>
-                    <span className="illustration-sun" />
-                </div>
-            </section>
-            <section className="member-quick-stats">
-                <article>
-                    <span className="quick-stat-icon quick-green">
-                        <BriefcaseBusiness size={17} />
-                    </span>
-                    <div>
-                        <strong>
-                            {open.length.toString().padStart(2, "0")}
-                        </strong>
-                        <span>Open assignments</span>
-                    </div>
-                </article>
-                <article>
-                    <span className="quick-stat-icon quick-blue">
-                        <CheckCheck size={17} />
-                    </span>
-                    <div>
-                        <strong>{completed.toString().padStart(2, "0")}</strong>
-                        <span>Completed this week</span>
-                    </div>
-                </article>
-                <article>
-                    <span className="quick-stat-icon quick-orange">
-                        <Clock3 size={17} />
-                    </span>
-                    <div>
-                        <strong>
-                            {tasks.reduce(
-                                (hours, task) =>
-                                    hours + (task.status !== "Complete"
-                                        ? Number(task.hours || 0)
-                                        : 0),
-                                0,
-                            )}
-                            <small>h</small>
-                        </strong>
-                        <span>Estimated remaining</span>
-                    </div>
-                </article>
-            </section>
-            <section className="member-task-layout">
-                <div className="member-main-tasks">
-                    <div className="member-section-head">
-                        <div>
-                            <span className="member-overline">
-                                YOUR PRIORITIES
-                            </span>
-                            <h2>
-                                On your plate <span>{open.length}</span>
-                            </h2>
-                        </div>
-                        <button
-                            className="button-secondary daily-log-action"
-                            onClick={onDailyUpdate}
-                        >
-                            <FileText size={15} /> Log today
-                        </button>
-                    </div>
-                    {nextTask && (
-                        <article className="focus-task">
-                            <div className="focus-task-top">
-                                <span className="focus-tag">
-                                    <i /> CURRENT FOCUS
-                                </span>
-                                <span
-                                    className={`priority priority-${nextTask.priority?.toLowerCase()}`}
-                                >
-                                    {nextTask.priority} priority
-                                </span>
-                            </div>
-                            <h3>{nextTask.title}</h3>
-                            <p>
-                                {nextTask.category} <b>·</b> Due{" "}
-                                {prettyDate(nextTask.dueDate)}
-                            </p>
-                            <div className="focus-task-bottom">
-                                <div className="focus-owner">
-                                    <span
-                                        className="avatar avatar-small"
-                                        style={{
-                                            background: user.color || "#dcefe7",
-                                        }}
-                                    >
-                                        {initials(user.name)}
-                                    </span>{" "}
-                                    Assigned to you
-                                </div>
-                                <select
-                                    aria-label={`Update status for ${nextTask.title}`}
-                                    value={nextTask.status}
-                                    onChange={(event) =>
-                                        onStatusChange(
-                                            nextTask.id,
-                                            event.target.value,
-                                        )}
-                                >
-                                    <option>Not started</option>
-                                    <option>In progress</option>
-                                    <option>Complete</option>
-                                </select>
-                            </div>
-                        </article>
-                    )}
-                    <div className="task-list">
-                        {open.filter((task) => task.id !== nextTask?.id).map((
-                            task,
-                        ) => (
-                            <MemberTaskRow
-                                key={task.id}
-                                task={task}
-                                onStatusChange={onStatusChange}
-                            />
-                        ))}
-                        {open.length === 0 && (
-                            <EmptyState
-                                title="You’re all caught up"
-                                detail="New assignments from your admin will show here."
-                            />
-                        )}
-                    </div>
-                </div>
-                <aside className="member-side-column">
-                    <article className="week-card">
-                        <div className="week-card-head">
-                            <div>
-                                <span className="member-overline">
-                                    THIS WEEK
-                                </span>
-                                <h2>Your momentum</h2>
-                            </div>
-                            <span className="week-icon">
-                                <Activity size={17} />
-                            </span>
-                        </div>
-                        <div className="week-score">
-                            <strong>
-                                {tasks.length
-                                    ? Math.round(completed / tasks.length * 100)
-                                    : 0}
-                                <small>%</small>
-                            </strong>
-                            <span>
-                                of your assignments<br />are complete
-                            </span>
-                        </div>
-                        <div className="week-progress">
-                            <span
-                                style={{
-                                    width: `${
-                                        tasks.length
-                                            ? completed / tasks.length * 100
-                                            : 0
-                                    }%`,
-                                }}
-                            />
-                        </div>
-                        <div className="week-foot">
-                            <span>{completed} completed</span>
-                            <span>{open.length} to go</span>
-                        </div>
-                        <div className="week-divider" />
-                        <div className="weekly-quote">
-                            <span>“</span>
-                            <p>
-                                Small steps, done consistently, make the big
-                                work feel lighter.
-                            </p>
-                        </div>
-                    </article>
-                    <article className="member-help">
-                        <span className="help-icon">
-                            <CircleHelp size={18} />
-                        </span>
-                        <div>
-                            <strong>Need a hand?</strong>
-                            <p>
-                                Reach out to your POD admin if priorities need a
-                                reset.
-                            </p>
-                        </div>
-                        <ArrowRight size={16} />
-                    </article>
-                </aside>
-            </section>
+export default function MemberWork({ user, tasks, updates = [], reportingManager, onStatusChange, onDailyUpdate, onNavigate, initialFilters = {}, busy }) {
+    const [filters, setFilters] = useState({ from: '', to: '', overdue: false, ...initialFilters });
+    const [details, setDetails] = useState(null);
+    const today = localDate();
+    const week = weekRange();
+    const ownUpdates = updates.filter((update) => emailKey(update.memberEmail) === emailKey(user.email));
+    const loggedToday = ownUpdates.some((update) => update.date === today);
+    const open = tasks.filter((task) => task.status !== 'Complete');
+    const completed = tasks.filter((task) => task.status === 'Complete');
+    const weeklyCompleted = completed.filter((task) => inDateRange(task.completedAt, week.from, week.to));
+    const overdue = open.filter((task) => isOverdue(task));
+    const shown = open.filter((task) => (!filters.overdue || isOverdue(task)) && inDateRange(task.dueDate, filters.from, filters.to))
+        .sort((a, b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+    const change = (values) => setFilters((previous) => ({ ...previous, ...values }));
+    return <div className="member-dashboard">
+        <PageIntro eyebrow="YOUR POD DESK" title={`My work · ${user.name.split(' ')[0]}`} subtitle="Start with overdue work and assignments due today." actions={<button className="button-primary" onClick={onDailyUpdate}><FileText size={16} />{loggedToday ? 'Edit today’s check-in' : 'Log today’s check-in'}</button>} />
+        <div className="personal-context"><span>Reports to <strong>{reportingManager?.name || (user.role === 'team-lead' ? 'POD admin' : 'Needs assignment')}</strong>{reportingManager?.email && ` · ${reportingManager.email}`}</span><span className={loggedToday ? 'check-in-done' : 'overdue-label'}>{loggedToday ? 'Today’s check-in saved' : 'Today’s check-in is missing'}</span></div>
+        <div className="stats-grid">
+            <button className="stat-link" aria-label={`Open assignments: ${open.length}`} onClick={() => change({ overdue: false, from: '', to: '' })}><StatCard label="Open assignments" value={open.length} note="All your active work" icon={BriefcaseBusiness} /></button>
+            <button className="stat-link" aria-label={`Overdue: ${overdue.length}`} onClick={() => change({ overdue: true, from: '', to: '' })}><StatCard label="Overdue" value={overdue.length} note="Past the due date" icon={Clock3} tone="amber" /></button>
+            <button className="stat-link" aria-label={`Completed this week: ${weeklyCompleted.length}`} onClick={() => onNavigate('history', week)}><StatCard label="Completed this week" value={weeklyCompleted.length} note="Monday through today" icon={CheckCheck} tone="blue" /></button>
+            <StatCard label="Estimated remaining" value={`${open.reduce((sum, task) => sum + Number(task.hours || 0), 0)}h`} note="For your open assignments" icon={Clock3} />
         </div>
-    );
+        <div className="report-filters"><DateFilters label="Due date" {...filters} onChange={change} /><label className="check-filter"><input type="checkbox" checked={Boolean(filters.overdue)} onChange={(event) => change({ overdue: event.target.checked })} />Overdue only</label><button className="button-secondary" onClick={() => change({ from: today, to: today, overdue: false })}>Due today</button><button className="button-secondary" onClick={() => change({ from: '', to: '', overdue: false })}>All open work</button></div>
+        <section className="panel personal-task-list"><div className="panel-heading"><h2>Your priorities</h2><span>{shown.length} assignments</span></div>{shown.map((task) => <article className="personal-task" key={task.id}><div><button className="task-title-button" onClick={() => setDetails(task)}>{task.title}</button><p>{task.category} · {task.priority} priority</p><span className={isOverdue(task) ? 'overdue-label' : ''}>Due {prettyDate(task.dueDate)}{isOverdue(task) ? ' · Overdue' : ''}</span></div><select disabled={busy} aria-label={`Update status for ${task.title}`} value={task.status} onChange={(event) => onStatusChange(task.id, event.target.value)}><option>Not started</option><option>In progress</option><option>Complete</option></select></article>)}{shown.length === 0 && <EmptyState title="No work in this selection" detail="Choose another date or view all open assignments." />}</section>
+        <section className="panel personal-blockers"><div className="panel-heading"><h2>Your blockers</h2><button className="text-link" onClick={onDailyUpdate}>Update check-in</button></div>{ownUpdates.filter(hasOpenBlocker).map((update) => <article key={update.id}><strong>{prettyDate(update.date)} · {update.blockers}</strong><p>{update.followUp ? `${update.followUpBy}: ${update.followUp}` : 'Awaiting team follow-up.'}</p>{update.escalatedTo && <span>Escalated to {update.escalatedTo}</span>}</article>)}{!ownUpdates.some(hasOpenBlocker) && <p>No unresolved blockers.</p>}</section>
+        <p className="completion-note">All-time completion: {tasks.length ? Math.round(completed.length / tasks.length * 100) : 0}% · {completed.length} completed assignments</p>
+        {details && <TaskDetails task={details} members={[user]} onClose={() => setDetails(null)} />}
+    </div>;
 }
-
-

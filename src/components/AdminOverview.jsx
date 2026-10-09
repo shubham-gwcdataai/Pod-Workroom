@@ -1,16 +1,17 @@
-import { ArrowRight, CheckCheck, ClipboardList, Plus, TriangleAlert, Users } from "lucide-react";
+import { ArrowRight, Plus, UserPlus, Clock3 } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { buildWeekData } from "../utils/date";
-import { AssignmentRow, DailyUpdateSummary, EmptyState, PageIntro, StatCard } from "./Shared";
+import { AssignmentRow, DailyUpdateSummary, EmptyState, PageIntro } from "./Shared";
 
-import TeamHierarchy from "./TeamHierarchy";
+import { TeamSummary } from "./TeamOverview";
+import { isOverdue } from '../utils/date';
 
 const STATUS_COLORS = { Complete: "#4d9c7c", "In progress": "#e0a44f", "Not started": "#c7d0d4" };
 
-export default function AdminOverview({ workspace, counts, onNewTask, onNavigate }) {
-    const completion = workspace.tasks.length
-        ? Math.round((counts.Complete || 0) / workspace.tasks.length * 100)
-        : 0;
+export default function AdminOverview({ workspace, counts, onNewTask, onAddPerson, onNavigate }) {
+    const overdue = workspace.tasks.filter((task) => isOverdue(task)).length;
+    const completed = counts.Complete || 0;
+    const completion = workspace.tasks.length ? Math.round(completed / workspace.tasks.length * 100) : 0;
     const chartData = [
         {
             name: "Complete",
@@ -32,9 +33,6 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
     const activeTasks = workspace.tasks.filter((task) =>
         task.status !== "Complete"
     ).slice(0, 4);
-    const openBlockers = workspace.dailyUpdates.filter((update) =>
-        update.blockerStatus === "Not solved" && update.blockers?.trim()
-    );
     const latestUpdates = workspace.dailyUpdates.slice(0, 3);
     return (
         <>
@@ -54,45 +52,11 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
                     </button>
                 }
             />
-            <section className="stats-grid" aria-label="POD progress metrics">
-                <StatCard
-                    label="Open work"
-                    value={workspace.tasks.filter((task) =>
-                        task.status !== "Complete"
-                    ).length.toString().padStart(2, "0")}
-                    note="Still in the queue"
-                    icon={ClipboardList}
-                    tone="mint"
-                />
-                <StatCard
-                    label="Completed"
-                    value={`${completion}%`}
-                    note="Of assigned work"
-                    icon={CheckCheck}
-                    tone="blue"
-                />
-                <StatCard
-                    label="Open blockers"
-                    value={openBlockers.length.toString().padStart(2, "0")}
-                    note="Reported by the team"
-                    icon={TriangleAlert}
-                    tone="amber"
-                />
-                <StatCard
-                    label="Team members"
-                    value={workspace.members.length.toString().padStart(2, "0")}
-                    note="In this workroom"
-                    icon={Users}
-                    tone="rose"
-                />
+            <section className="admin-command-panel" aria-label="Workspace actions">
+                <div className="command-copy"><span className="panel-overline">WORKSPACE AT A GLANCE</span><h2>{workspace.members.length} people. One shared workspace.</h2><p>{completed} of {workspace.tasks.length} assignments complete · {completion}% completion</p><div className="command-progress" role="progressbar" aria-label="Assignment completion" aria-valuenow={completion} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${completion}%` }} /></div></div>
+                <div className="command-actions"><button className="button-secondary" onClick={onAddPerson}><UserPlus size={17} />Add a person</button><button className="button-secondary" onClick={() => onNavigate('work', { overdue: true })}><Clock3 size={17} />{overdue} overdue<ArrowRight size={15} /></button></div>
             </section>
-            <section className="overview-hierarchy" aria-label="Team reporting hierarchy">
-                <div className="panel-heading">
-                    <div><span className="panel-overline">ADMIN → TEAM LEADS → TEAM HEADS → MEMBERS</span><h2>Team hierarchy</h2></div>
-                    <button className="button-secondary" onClick={() => onNavigate("team")}>Manage people <ArrowRight size={14} /></button>
-                </div>
-                <TeamHierarchy members={workspace.members} tasks={workspace.tasks} />
-            </section>
+            <TeamSummary workspace={workspace} user={{ role: "admin" }} onNavigate={onNavigate} />
             <section className="analytics-grid">
                 <article className="panel throughput-panel">
                     <div className="panel-heading">
@@ -100,9 +64,9 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
                             <span className="panel-overline">
                                 TEAM ACTIVITY
                             </span>
-                            <h2>Weekly throughput</h2>
+                            <h2>Daily throughput</h2>
                         </div>
-                        <span className="chart-period">This week</span>
+                        <span className="chart-period">Last 7 days</span>
                     </div>
                     <div className="chart-legend">
                         <span>
@@ -176,6 +140,7 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
                                     dy={9}
                                 />
                                 <YAxis
+                                    allowDecimals={false}
                                     axisLine={false}
                                     tickLine={false}
                                     tick={{ fill: "#89968f", fontSize: 11 }}
@@ -253,13 +218,13 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
                     </div>
                     <div className="status-legend">
                         {chartData.map((item) => (
-                            <div key={item.name}>
+                            <button key={item.name} onClick={() => onNavigate('work', { status: item.name })} aria-label={`View ${item.value} ${item.name.toLowerCase()} assignments`}>
                                 <span>
                                     <i style={{ background: item.color }} />
                                     {item.name}
                                 </span>
                                 <strong>{item.value}</strong>
-                            </div>
+                            </button>
                         ))}
                     </div>
                 </article>
@@ -327,5 +292,3 @@ export default function AdminOverview({ workspace, counts, onNewTask, onNavigate
         </>
     );
 }
-
-

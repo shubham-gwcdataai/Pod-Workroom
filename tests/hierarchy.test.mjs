@@ -43,6 +43,7 @@ test('store keeps existing workflows and history while enforcing assignment and 
   let source = await readFile(new URL('../src/podStore.js', import.meta.url), 'utf8');
   source = source.replace("import Domo from 'ryuu.js';", 'const Domo = {};')
     .replace("'./utils/hierarchy.js'", JSON.stringify(pathToFileURL(new URL('../src/utils/hierarchy.js', import.meta.url).pathname.replace(/^\/(\w:)/, '$1')).href))
+    .replace("'./utils/date.js'", JSON.stringify(new URL('../src/utils/date.js', import.meta.url).href))
     .replaceAll('import.meta.env', '({ VITE_ADMIN_EMAIL: "admin@qa.local" })');
   const store = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   await store.initializeStore();

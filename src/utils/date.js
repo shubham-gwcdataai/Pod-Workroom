@@ -2,6 +2,26 @@ export function initials(name = "") {
     return name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 }
 
+export function localDate(date = new Date()) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function weekRange(date = new Date()) {
+    const start = new Date(date);
+    start.setDate(start.getDate() - (start.getDay() + 6) % 7);
+    return { from: localDate(start), to: localDate(date) };
+}
+
+export function inDateRange(value, from = '', to = '') {
+    const key = value?.slice(0, 10);
+    if (!from && !to) return true;
+    return Boolean(key && (!from || key >= from) && (!to || key <= to));
+}
+
+export function isOverdue(task, today = localDate()) {
+    return task.status !== 'Complete' && Boolean(task.dueDate && task.dueDate < today);
+}
+
 export function prettyDate(date) {
     if (!date) return "No due date";
     return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" })

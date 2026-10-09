@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Check, ClipboardList, FileText } from "lucide-react";
 import { PageIntro } from "./Shared";
+import { localDate } from "../utils/date";
 
 export default function DailyUpdateForm({ user, updates, onSave }) {
-    const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+    const [date, setDate] = useState(localDate());
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState("");
@@ -60,7 +61,7 @@ export default function DailyUpdateForm({ user, updates, onSave }) {
                         </div>
                         {currentUpdate && (
                             <span className="saved-indicator">
-                                <Check size={13} /> Saved today
+                                <Check size={13} /> Saved for this date
                             </span>
                         )}
                     </div>
@@ -146,7 +147,7 @@ export default function DailyUpdateForm({ user, updates, onSave }) {
                     <span className="panel-overline">A GOOD HANDOFF</span>
                     <h2>Make the next step clear.</h2>
                     <p>
-                        Your update is shared with POD admins so they can spot
+                        Your update is shared with your head, lead, and admin so they can spot
                         progress, support blockers, and keep the work moving.
                     </p>
                     <div className="aside-log-fields">

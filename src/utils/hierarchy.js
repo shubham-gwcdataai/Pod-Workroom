@@ -37,10 +37,12 @@ export function scopeWorkspace(workspace, user) {
     if (user?.role === 'admin') return workspace;
     const members = visibleMembers(workspace.members, user);
     const emails = new Set(members.map((member) => emailKey(member.email)));
+    const manager = user && managerFor(user, workspace.members);
     return {
         members,
         tasks: workspace.tasks.filter((task) => emails.has(emailKey(task.memberEmail))),
         dailyUpdates: workspace.dailyUpdates.filter((update) => emails.has(emailKey(update.memberEmail))),
+        ...(manager ? { reportingManager: { name: manager.name, email: manager.email, title: manager.title, role: manager.role } } : {}),
     };
 }
 
