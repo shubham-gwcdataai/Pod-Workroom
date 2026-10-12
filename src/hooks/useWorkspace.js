@@ -142,7 +142,7 @@ export function useWorkspace() {
     }
 
     const reassignTasks = (ids, email) => perform(() => bulkReassignTasks(ids, email), (result) => `${result.saved} assignments reassigned; ${result.failed} failed.`);
-    const reassignPeople = (emails, manager) => perform(() => bulkReassignPeople(emails, manager), (result) => `${result.saved} people reassigned; ${result.failed} failed.`);
+    const reassignPeople = (emails, managers) => perform(() => bulkReassignPeople(emails, managers), (result) => `${result.saved} people reassigned; ${result.failed} failed.${result.skipped ? ` ${result.skipped} team leads still report to Admin.` : ''}`);
     const saveFollowUp = (id, changes) => perform(() => followUpBlocker(id, changes), 'Blocker follow-up saved.');
     const removePeople = (emails) => perform(() => bulkDeletePeople(emails), (result) => `${result.saved} people deleted; ${result.failed} failed. Work history retained.`);
     const removeTasks = (ids) => perform(() => bulkDeleteTasks(ids), (result) => `${result.saved} assignments deleted; ${result.failed} failed.`);

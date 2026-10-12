@@ -69,6 +69,23 @@ test('Domo collection read failures identify the collection and HTTP status with
 });
 
 for(const mode of [false,true]) {
+ test('mixed-role reassignment uses a manager per role and keeps leads with Admin in '+(mode?'AppDB':'local storage'),async()=>{
+  const{store,actor}=await setup(mode);
+  actor('head-a@qa.local');
+  await assert.rejects(store.bulkReassignPeople(['head-a@qa.local','member-a@qa.local'],{'team-head':'lead-b@qa.local','team-member':'head-b@qa.local'}),/Only administrators/);
+  actor('admin@qa.local');
+  let result=await store.bulkReassignPeople(['lead-a@qa.local','head-a@qa.local','member-a@qa.local','member-a@qa.local'],{'team-head':'lead-b@qa.local','team-member':'head-b@qa.local'});
+  assert.equal(result.saved,2);assert.equal(result.skipped,1);assert.equal(result.failed,0);
+  let data=await store.loadWorkspace();
+  assert.equal(data.members.find(p=>p.id==='ha').managerEmail,'lead-b@qa.local');
+  assert.equal(data.members.find(p=>p.id==='ma').managerEmail,'head-b@qa.local');
+  assert.equal(data.members.find(p=>p.id==='la').managerEmail,'');
+  assert.equal(data.tasks[0].memberEmail,'member-a@qa.local');
+  result=await store.bulkReassignPeople(['head-a@qa.local','member-a@qa.local'],{'team-head':'head-b@qa.local','team-member':'head-a@qa.local'});
+  assert.deepEqual(result.failedIds,['head-a@qa.local']);assert.equal(result.saved,1);
+  data=await store.loadWorkspace();assert.equal(data.members.find(p=>p.id==='ha').managerEmail,'lead-b@qa.local');
+  result=await store.bulkReassignPeople(['member-a@qa.local'],{});assert.equal(result.failed,1);
+ });
  test('bulk deletion and status changes enforce Admin and preserve retained records in '+(mode?'AppDB':'local storage'),async()=>{
   const{store,actor}=await setup(mode);
   actor('lead-a@qa.local');

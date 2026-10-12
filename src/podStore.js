@@ -382,8 +382,19 @@ export async function bulkReassignTasks(ids, memberEmail) {
   return bulkOperation(ids, (id) => updateTask(id, { memberEmail }))
 }
 
-export async function bulkReassignPeople(emails, managerEmail) {
-  return bulkOperation(emails.map(emailKey), (email) => updateMember(email, { managerEmail }))
+export async function bulkReassignPeople(emails, managers) {
+  if (typeof managers === 'string') return bulkOperation(emails.map(emailKey), (email) => updateMember(email, { managerEmail: managers }))
+  await requireAdmin()
+  const people = await list(COLLECTIONS.members)
+  const requested = [...new Set(emails.map(emailKey))]
+  const skippedIds = requested.filter((email) => people.some((person) => emailKey(person.email) === email && person.role === 'team-lead'))
+  const results = await bulkOperation(requested.filter((email) => !skippedIds.includes(email)), (email) => {
+    const person = people.find((candidate) => emailKey(candidate.email) === email)
+    const managerEmail = managers?.[person?.role]
+    if (!managerEmail) throw new Error(`Choose a reporting manager for ${person?.name || email}.`)
+    return updateMember(email, { managerEmail })
+  })
+  return { ...results, skipped: skippedIds.length, skippedIds }
 }
 
 async function bulkOperation(items, operation) {
